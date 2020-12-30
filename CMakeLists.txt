@@ -1,26 +1,29 @@
-set(COMPONENT_ADD_INCLUDEDIRS "port/include aws-iot-device-sdk-embedded-C/include")
-set(aws_sdk_dir aws-iot-device-sdk-embedded-C/src)
-set(COMPONENT_SRCS "${aws_sdk_dir}/aws_iot_jobs_interface.c"
-                   "${aws_sdk_dir}/aws_iot_jobs_json.c"
-                   "${aws_sdk_dir}/aws_iot_jobs_topics.c"
-                   "${aws_sdk_dir}/aws_iot_jobs_types.c"
-                   "${aws_sdk_dir}/aws_iot_json_utils.c"
-                   "${aws_sdk_dir}/aws_iot_mqtt_client.c"
-                   "${aws_sdk_dir}/aws_iot_mqtt_client_common_internal.c"
-                   "${aws_sdk_dir}/aws_iot_mqtt_client_connect.c"
-                   "${aws_sdk_dir}/aws_iot_mqtt_client_publish.c"
-                   "${aws_sdk_dir}/aws_iot_mqtt_client_subscribe.c"
-                   "${aws_sdk_dir}/aws_iot_mqtt_client_unsubscribe.c"
-                   "${aws_sdk_dir}/aws_iot_mqtt_client_yield.c"
-                   "${aws_sdk_dir}/aws_iot_shadow.c"
-                   "${aws_sdk_dir}/aws_iot_shadow_actions.c"
-                   "${aws_sdk_dir}/aws_iot_shadow_json.c"
-                   "${aws_sdk_dir}/aws_iot_shadow_records.c"
-                   "port/network_mbedtls_wrapper.c"
-                   "port/threads_freertos.c"
-                   "port/timer.c")
+set(libs ${CMAKE_CURRENT_LIST_DIR}/aws-iot-device-sdk-embedded-C/libraries)
+set(demos ${CMAKE_CURRENT_LIST_DIR}/aws-iot-device-sdk-embedded-C/demos)
 
-set(COMPONENT_REQUIRES "mbedtls")
-set(COMPONENT_PRIV_REQUIRES "jsmn")
+include(${libs}/standard/coreMQTT/mqttFilePaths.cmake)
+include(${libs}/standard/backoffAlgorithm/backoffAlgorithmFilePaths.cmake)
+include(${libs}/aws/device-shadow-for-aws-iot-embedded-sdk/shadowFilePaths.cmake)
+include(${libs}/standard/coreJSON/jsonFilePaths.cmake)
+include(${demos}/logging-stack/logging.cmake)
+
+set(COMPONENT_ADD_INCLUDEDIRS
+    ${LOGGING_INCLUDE_DIRS}
+    ${MQTT_INCLUDE_PUBLIC_DIRS}
+    ${BACKOFF_ALGORITHM_INCLUDE_PUBLIC_DIRS}
+    ${SHADOW_INCLUDE_PUBLIC_DIRS}
+    ${JSON_INCLUDE_PUBLIC_DIRS}
+    "port/include"
+)
+
+set(COMPONENT_SRCS
+    ${MQTT_SOURCES}
+    ${MQTT_SERIALIZER_SOURCES}
+    ${BACKOFF_ALGORITHM_SOURCES}
+    ${SHADOW_SOURCES}
+    ${JSON_SOURCES}
+)
+
+# set(COMPONENT_REQUIRES "mbedtls")
 
 register_component()
