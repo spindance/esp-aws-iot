@@ -1,29 +1,8 @@
-/*
- * Copyright 2010-2015 Amazon.com, Inc. or its affiliates. All Rights Reserved.
- * Additions Copyright 2016 Espressif Systems (Shanghai) PTE LTD
- *
- * Licensed under the Apache License, Version 2.0 (the "License").
- * You may not use this file except in compliance with the License.
- * A copy of the License is located at
- *
- *  http://aws.amazon.com/apache2.0
- *
- * or in the "license" file accompanying this file. This file is distributed
- * on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language governing
- * permissions and limitations under the License.
- */
 #include <sys/param.h>
 #include <stdbool.h>
 #include <string.h>
-#include <timer_platform.h>
-#include <network_interface.h>
 
-#include "aws_iot_config.h"
-#include "aws_iot_error.h"
-#include "network_interface.h"
-#include "network_platform.h"
-
+#include "network_mbedtls_wrapper.h"
 #include "mbedtls/esp_debug.h"
 
 #ifdef CONFIG_AWS_IOT_USE_HARDWARE_SECURE_ELEMENT
@@ -45,7 +24,7 @@ static const char *TAG = "aws_iot";
  *
  * Currently used to print debug-level information about each cert.
  */
-static int _iot_tls_verify_cert(void *data, mbedtls_x509_crt *crt, int depth, uint32_t *flags) {
+static int _verify_cert(void *data, mbedtls_x509_crt *crt, int depth, uint32_t *flags) {
     char buf[256];
     ((void) data);
 
@@ -64,9 +43,15 @@ static int _iot_tls_verify_cert(void *data, mbedtls_x509_crt *crt, int depth, ui
     return 0;
 }
 
-static void _iot_tls_set_connect_params(Network *pNetwork, const char *pRootCALocation, const char *pDeviceCertLocation,
-                                 const char *pDevicePrivateKeyLocation, const char *pDestinationURL,
-                                 uint16_t destinationPort, uint32_t timeout_ms, bool ServerVerificationFlag) {
+static void _set_connect_params(
+        NetworkContext_t *pNetwork,
+        const char *pRootCALocation,
+        const char *pDeviceCertLocation,
+        const char *pDevicePrivateKeyLocation,
+        const char *pDestinationURL,
+        uint16_t destinationPort,
+        uint32_t timeout_ms,
+        bool ServerVerificationFlag) {
     pNetwork->tlsConnectParams.DestinationPort = destinationPort;
     pNetwork->tlsConnectParams.pDestinationURL = pDestinationURL;
     pNetwork->tlsConnectParams.pDeviceCertLocation = pDeviceCertLocation;
@@ -76,43 +61,48 @@ static void _iot_tls_set_connect_params(Network *pNetwork, const char *pRootCALo
     pNetwork->tlsConnectParams.ServerVerificationFlag = ServerVerificationFlag;
 }
 
-IoT_Error_t iot_tls_init(Network *pNetwork, const char *pRootCALocation, const char *pDeviceCertLocation,
-                         const char *pDevicePrivateKeyLocation, const char *pDestinationURL,
-                         uint16_t destinationPort, uint32_t timeout_ms, bool ServerVerificationFlag) {
-    _iot_tls_set_connect_params(pNetwork, pRootCALocation, pDeviceCertLocation, pDevicePrivateKeyLocation,
-                                pDestinationURL, destinationPort, timeout_ms, ServerVerificationFlag);
-
-    pNetwork->connect = iot_tls_connect;
-    pNetwork->read = iot_tls_read;
-    pNetwork->write = iot_tls_write;
-    pNetwork->disconnect = iot_tls_disconnect;
-    pNetwork->isConnected = iot_tls_is_connected;
-    pNetwork->destroy = iot_tls_destroy;
-
+MbedtlsStatus_t Mbedtls_Init(
+        NetworkContext_t *pNetwork,
+        const char *pRootCALocation,
+        const char *pDeviceCertLocation,
+        const char *pDevicePrivateKeyLocation,
+        const char *pDestinationURL,
+        uint16_t destinationPort,
+        uint32_t timeout_ms,
+        bool ServerVerificationFlag) {
+    _set_connect_params(
+            pNetwork,
+            pRootCALocation,
+            pDeviceCertLocation,
+            pDevicePrivateKeyLocation,
+            pDestinationURL,
+            destinationPort,
+            timeout_ms,
+            ServerVerificationFlag);
     pNetwork->tlsDataParams.flags = 0;
-
-    return SUCCESS;
+    return MBEDTLS_SUCCESS;
 }
 
-IoT_Error_t iot_tls_is_connected(Network *pNetwork) {
-    /* Use this to add implementation which can check for physical layer disconnect */
-    return NETWORK_PHYSICAL_LAYER_CONNECTED;
-}
-
-IoT_Error_t iot_tls_connect(Network *pNetwork, TLSConnectParams *params) {
-    int ret = SUCCESS;
+MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* params) {
+    int ret = MBEDTLS_SUCCESS;
     TLSDataParams *tlsDataParams = NULL;
     char portBuffer[6];
     char info_buf[256];
 
     if(NULL == pNetwork) {
-        return NULL_VALUE_ERROR;
+        return MBEDTLS_NULL_VALUE_ERROR;
     }
 
     if(NULL != params) {
-        _iot_tls_set_connect_params(pNetwork, params->pRootCALocation, params->pDeviceCertLocation,
-                                    params->pDevicePrivateKeyLocation, params->pDestinationURL,
-                                    params->DestinationPort, params->timeout_ms, params->ServerVerificationFlag);
+        _set_connect_params(
+                pNetwork,
+                params->pRootCALocation,
+                params->pDeviceCertLocation,
+                params->pDevicePrivateKeyLocation,
+                params->pDestinationURL,
+                params->DestinationPort,
+                params->timeout_ms,
+                params->ServerVerificationFlag);
     }
 
     tlsDataParams = &(pNetwork->tlsDataParams);
@@ -135,7 +125,7 @@ IoT_Error_t iot_tls_connect(Network *pNetwork, TLSConnectParams *params) {
     if((ret = mbedtls_ctr_drbg_seed(&(tlsDataParams->ctr_drbg), mbedtls_entropy_func, &(tlsDataParams->entropy),
                                     (const unsigned char *) TAG, strlen(TAG))) != 0) {
         ESP_LOGE(TAG, "failed! mbedtls_ctr_drbg_seed returned -0x%x", -ret);
-        return NETWORK_MBEDTLS_ERR_CTR_DRBG_ENTROPY_SOURCE_FAILED;
+        return MBEDTLS_ENTROPY_SOURCE_FAILED;
     }
 
    /*  Load root CA...
@@ -155,7 +145,7 @@ IoT_Error_t iot_tls_connect(Network *pNetwork, TLSConnectParams *params) {
 
     if(ret < 0) {
         ESP_LOGE(TAG, "failed!  mbedtls_x509_crt_parse returned -0x%x while parsing root cert", -ret);
-        return NETWORK_X509_ROOT_CRT_PARSE_ERROR;
+        return MBEDTLS_ROOT_CRT_PARSE_ERROR;
     }
     ESP_LOGD(TAG, "ok (%d skipped)", ret);
 
@@ -184,7 +174,7 @@ IoT_Error_t iot_tls_connect(Network *pNetwork, TLSConnectParams *params) {
     }
     if(ret != 0) {
         ESP_LOGE(TAG, "failed!  mbedtls_x509_crt_parse returned -0x%x while parsing device cert", -ret);
-        return NETWORK_X509_DEVICE_CRT_PARSE_ERROR;
+        return MBEDTLS_DEVICE_CRT_PARSE_ERROR;
     }
 
     /* Parse client private key... */
@@ -217,7 +207,7 @@ IoT_Error_t iot_tls_connect(Network *pNetwork, TLSConnectParams *params) {
     }
     if(ret != 0) {
         ESP_LOGE(TAG, "failed!  mbedtls_pk_parse_key returned -0x%x while parsing private key", -ret);
-        return NETWORK_PK_PRIVATE_KEY_PARSE_ERROR;
+        return MBEDTLS_PRIVATE_KEY_PARSE_ERROR;
     }
 
     /* Done parsing certs */
@@ -229,29 +219,29 @@ IoT_Error_t iot_tls_connect(Network *pNetwork, TLSConnectParams *params) {
         ESP_LOGE(TAG, "failed! mbedtls_net_connect returned -0x%x", -ret);
         switch(ret) {
             case MBEDTLS_ERR_NET_SOCKET_FAILED:
-                return NETWORK_ERR_NET_SOCKET_FAILED;
+                return MBEDTLS_SOCKET_FAILED;
             case MBEDTLS_ERR_NET_UNKNOWN_HOST:
-                return NETWORK_ERR_NET_UNKNOWN_HOST;
+                return MBEDTLS_UNKNOWN_HOST;
             case MBEDTLS_ERR_NET_CONNECT_FAILED:
             default:
-                return NETWORK_ERR_NET_CONNECT_FAILED;
+                return MBEDTLS_CONNECT_FAILED;
         };
     }
 
     ret = mbedtls_net_set_block(&(tlsDataParams->server_fd));
     if(ret != 0) {
         ESP_LOGE(TAG, "failed! net_set_(non)block() returned -0x%x", -ret);
-        return SSL_CONNECTION_ERROR;
+        return MBEDTLS_SSL_CONNECTION_ERROR;
     } ESP_LOGD(TAG, "ok");
 
     ESP_LOGD(TAG, "Setting up the SSL/TLS structure...");
     if((ret = mbedtls_ssl_config_defaults(&(tlsDataParams->conf), MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM,
                                           MBEDTLS_SSL_PRESET_DEFAULT)) != 0) {
         ESP_LOGE(TAG, "failed! mbedtls_ssl_config_defaults returned -0x%x", -ret);
-        return SSL_CONNECTION_ERROR;
+        return MBEDTLS_SSL_CONNECTION_ERROR;
     }
 
-    mbedtls_ssl_conf_verify(&(tlsDataParams->conf), _iot_tls_verify_cert, NULL);
+    mbedtls_ssl_conf_verify(&(tlsDataParams->conf), _verify_cert, NULL);
 
     if(pNetwork->tlsConnectParams.ServerVerificationFlag == true) {
         mbedtls_ssl_conf_authmode(&(tlsDataParams->conf), MBEDTLS_SSL_VERIFY_REQUIRED);
@@ -264,7 +254,7 @@ IoT_Error_t iot_tls_connect(Network *pNetwork, TLSConnectParams *params) {
     ret = mbedtls_ssl_conf_own_cert(&(tlsDataParams->conf), &(tlsDataParams->clicert), &(tlsDataParams->pkey));
     if(ret != 0) {
         ESP_LOGE(TAG, "failed! mbedtls_ssl_conf_own_cert returned %d", ret);
-        return SSL_CONNECTION_ERROR;
+        return MBEDTLS_SSL_CONNECTION_ERROR;
     }
 
     mbedtls_ssl_conf_read_timeout(&(tlsDataParams->conf), pNetwork->tlsConnectParams.timeout_ms);
@@ -275,18 +265,18 @@ IoT_Error_t iot_tls_connect(Network *pNetwork, TLSConnectParams *params) {
         const char *alpnProtocols[] = { "x-amzn-mqtt-ca", NULL };
         if ((ret = mbedtls_ssl_conf_alpn_protocols(&(tlsDataParams->conf), alpnProtocols)) != 0) {
             ESP_LOGE(TAG, "failed! mbedtls_ssl_conf_alpn_protocols returned -0x%x", -ret);
-            return SSL_CONNECTION_ERROR;
+            return MBEDTLS_SSL_CONNECTION_ERROR;
         }
     }
 #endif
 
     if((ret = mbedtls_ssl_setup(&(tlsDataParams->ssl), &(tlsDataParams->conf))) != 0) {
         ESP_LOGE(TAG, "failed! mbedtls_ssl_setup returned -0x%x", -ret);
-        return SSL_CONNECTION_ERROR;
+        return MBEDTLS_SSL_CONNECTION_ERROR;
     }
     if((ret = mbedtls_ssl_set_hostname(&(tlsDataParams->ssl), pNetwork->tlsConnectParams.pDestinationURL)) != 0) {
         ESP_LOGE(TAG, "failed! mbedtls_ssl_set_hostname returned %d", ret);
-        return SSL_CONNECTION_ERROR;
+        return MBEDTLS_SSL_CONNECTION_ERROR;
     }
     ESP_LOGD(TAG, "SSL state connect : %d ", tlsDataParams->ssl.state);
     mbedtls_ssl_set_bio(&(tlsDataParams->ssl), &(tlsDataParams->server_fd), mbedtls_net_send, NULL,
@@ -301,7 +291,7 @@ IoT_Error_t iot_tls_connect(Network *pNetwork, TLSConnectParams *params) {
             if(ret == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED) {
                 ESP_LOGE(TAG, "    Unable to verify the server's certificate. ");
             }
-            return SSL_CONNECTION_ERROR;
+            return MBEDTLS_SSL_CONNECTION_ERROR;
         }
     }
 
@@ -320,14 +310,14 @@ IoT_Error_t iot_tls_connect(Network *pNetwork, TLSConnectParams *params) {
             ESP_LOGE(TAG, "failed");
             mbedtls_x509_crt_verify_info(info_buf, sizeof(info_buf), "  ! ", tlsDataParams->flags);
             ESP_LOGE(TAG, "%s", info_buf);
-            ret = SSL_CONNECTION_ERROR;
+            ret = MBEDTLS_SSL_CONNECTION_ERROR;
         } else {
             ESP_LOGD(TAG, "ok");
-            ret = SUCCESS;
+            ret = MBEDTLS_SUCCESS;
         }
     } else {
         ESP_LOGW(TAG, " Server Verification skipped");
-        ret = SUCCESS;
+        ret = MBEDTLS_SUCCESS;
     }
 
     if(LOG_LOCAL_LEVEL >= ESP_LOG_DEBUG) {
@@ -338,19 +328,22 @@ IoT_Error_t iot_tls_connect(Network *pNetwork, TLSConnectParams *params) {
         }
     }
 
-    return (IoT_Error_t) ret;
+    return (MbedtlsStatus_t) ret;
 }
 
-IoT_Error_t iot_tls_write(Network *pNetwork, unsigned char *pMsg, size_t len, Timer *timer, size_t *written_len) {
+int32_t Mbedtls_Send( NetworkContext_t * pNetwork,
+                      const void * pBuffer,
+                      size_t bytesToSend ) {
     size_t written_so_far;
     bool isErrorFlag = false;
     int frags, ret = 0;
     TLSDataParams *tlsDataParams = &(pNetwork->tlsDataParams);
+    size_t len = bytesToSend;
 
     for(written_so_far = 0, frags = 0;
-        written_so_far < len && !has_timer_expired(timer); written_so_far += ret, frags++) {
-        while(!has_timer_expired(timer) &&
-              (ret = mbedtls_ssl_write(&(tlsDataParams->ssl), pMsg + written_so_far, len - written_so_far)) <= 0) {
+        written_so_far < len;
+        written_so_far += ret, frags++) {
+        while((ret = mbedtls_ssl_write(&(tlsDataParams->ssl), pBuffer + written_so_far, len - written_so_far)) <= 0) {
             if(ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
                 ESP_LOGE(TAG, "failed! mbedtls_ssl_write returned -0x%x", -ret);
                 /* All other negative return values indicate connection needs to be reset.
@@ -364,65 +357,65 @@ IoT_Error_t iot_tls_write(Network *pNetwork, unsigned char *pMsg, size_t len, Ti
         }
     }
 
-    *written_len = written_so_far;
-
     if(isErrorFlag) {
-        return NETWORK_SSL_WRITE_ERROR;
-    } else if(has_timer_expired(timer) && written_so_far != len) {
-        return NETWORK_SSL_WRITE_TIMEOUT_ERROR;
+        return -MBEDTLS_SSL_WRITE_ERROR;
+    } else if (written_so_far != len) {
+        return -MBEDTLS_SSL_WRITE_TIMEOUT_ERROR;
     }
 
-    return SUCCESS;
+    return bytesToSend;
 }
 
-IoT_Error_t iot_tls_read(Network *pNetwork, unsigned char *pMsg, size_t len, Timer *timer, size_t *read_len) {
+int32_t Mbedtls_Recv( NetworkContext_t * pNetwork,
+                      void * pBuffer,
+                      size_t bytesToRecv ) {
     TLSDataParams *tlsDataParams = &(pNetwork->tlsDataParams);
     mbedtls_ssl_context *ssl = &(tlsDataParams->ssl);
-    mbedtls_ssl_config *ssl_conf = &(tlsDataParams->conf);
-    uint32_t read_timeout;
+    size_t len = bytesToRecv;
     size_t rxLen = 0;
     int ret;
 
-    read_timeout = ssl_conf->read_timeout;
+    ESP_LOGD(TAG, "Attempting recv %u bytes", bytesToRecv);
 
     while (len > 0) {
-
-        /* Make sure we never block on read for longer than timer has left,
-         but also that we don't block indefinitely (ie read_timeout > 0) */
-        mbedtls_ssl_conf_read_timeout(ssl_conf, MAX(1, MIN(read_timeout, left_ms(timer))));
-
-        ret = mbedtls_ssl_read(ssl, pMsg, len);
-
-        /* Restore the old timeout */
-        mbedtls_ssl_conf_read_timeout(ssl_conf, read_timeout);
+        ret = mbedtls_ssl_read(ssl, pBuffer, len);
 
         if (ret > 0) {
             rxLen += ret;
-            pMsg += ret;
+            pBuffer += ret;
             len -= ret;
         } else if (ret == 0 || (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE && ret != MBEDTLS_ERR_SSL_TIMEOUT)) {
-            return NETWORK_SSL_READ_ERROR;
-        }
-
-        // Evaluate timeout after the read to make sure read is done at least once
-        if (has_timer_expired(timer)) {
-            break;
+            ESP_LOGE(TAG, "ssl read failed, ret = %d", ret);
+            return -MBEDTLS_SSL_READ_ERROR;
         }
     }
 
+    ESP_LOGD(TAG, "ssl read, received %u bytes", rxLen);
+
     if (len == 0) {
-        *read_len = rxLen;
-        return SUCCESS;
+        return rxLen;
     }
 
     if (rxLen == 0) {
-        return NETWORK_SSL_NOTHING_TO_READ;
+        return -MBEDTLS_SSL_NOTHING_TO_READ;
     } else {
-        return NETWORK_SSL_READ_TIMEOUT_ERROR;
+        return -MBEDTLS_SSL_READ_TIMEOUT_ERROR;
     }
 }
 
-IoT_Error_t iot_tls_disconnect(Network *pNetwork) {
+static void _tls_destroy(const NetworkContext_t *pNetwork) {
+    TLSDataParams *tlsDataParams = &(pNetwork->tlsDataParams);
+    mbedtls_net_free(&(tlsDataParams->server_fd));
+    mbedtls_x509_crt_free(&(tlsDataParams->clicert));
+    mbedtls_x509_crt_free(&(tlsDataParams->cacert));
+    mbedtls_pk_free(&(tlsDataParams->pkey));
+    mbedtls_ssl_free(&(tlsDataParams->ssl));
+    mbedtls_ssl_config_free(&(tlsDataParams->conf));
+    mbedtls_ctr_drbg_free(&(tlsDataParams->ctr_drbg));
+    mbedtls_entropy_free(&(tlsDataParams->entropy));
+}
+
+MbedtlsStatus_t Mbedtls_Disconnect( const NetworkContext_t * pNetwork ) {
     mbedtls_ssl_context *ssl = &(pNetwork->tlsDataParams.ssl);
     int ret = 0;
     do {
@@ -431,22 +424,7 @@ IoT_Error_t iot_tls_disconnect(Network *pNetwork) {
 
     /* All other negative return values indicate connection needs to be reset.
      * No further action required since this is disconnect call */
-
-    return SUCCESS;
+    _tls_destroy(pNetwork);
+    return MBEDTLS_SUCCESS;
 }
 
-IoT_Error_t iot_tls_destroy(Network *pNetwork) {
-    TLSDataParams *tlsDataParams = &(pNetwork->tlsDataParams);
-
-    mbedtls_net_free(&(tlsDataParams->server_fd));
-
-    mbedtls_x509_crt_free(&(tlsDataParams->clicert));
-    mbedtls_x509_crt_free(&(tlsDataParams->cacert));
-    mbedtls_pk_free(&(tlsDataParams->pkey));
-    mbedtls_ssl_free(&(tlsDataParams->ssl));
-    mbedtls_ssl_config_free(&(tlsDataParams->conf));
-    mbedtls_ctr_drbg_free(&(tlsDataParams->ctr_drbg));
-    mbedtls_entropy_free(&(tlsDataParams->entropy));
-
-    return SUCCESS;
-}

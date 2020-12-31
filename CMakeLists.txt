@@ -22,8 +22,15 @@ set(COMPONENT_SRCS
     ${BACKOFF_ALGORITHM_SOURCES}
     ${SHADOW_SOURCES}
     ${JSON_SOURCES}
+    "port/clock.c"
+    "port/network_mbedtls_wrapper.c"
 )
 
-# set(COMPONENT_REQUIRES "mbedtls")
+set(COMPONENT_REQUIRES
+    "mbedtls"
+    "pal"
+)
 
 register_component()
+
+component_compile_options("-DLOG_LOCAL_LEVEL=ESP_LOG_DEBUG")
