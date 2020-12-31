@@ -16,9 +16,6 @@
 
 static const char *TAG = "aws_iot";
 
-/* This is the value used for ssl read timeout */
-#define IOT_SSL_READ_TIMEOUT 10
-
 /*
  * This is a function to do further verification if needed on the cert received.
  *
@@ -334,36 +331,19 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
 int32_t Mbedtls_Send( NetworkContext_t * pNetwork,
                       const void * pBuffer,
                       size_t bytesToSend ) {
-    size_t written_so_far;
-    bool isErrorFlag = false;
-    int frags, ret = 0;
     TLSDataParams *tlsDataParams = &(pNetwork->tlsDataParams);
-    size_t len = bytesToSend;
+    int32_t bytesSent = 0;
 
-    for(written_so_far = 0, frags = 0;
-        written_so_far < len;
-        written_so_far += ret, frags++) {
-        while((ret = mbedtls_ssl_write(&(tlsDataParams->ssl), pBuffer + written_so_far, len - written_so_far)) <= 0) {
-            if(ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
-                ESP_LOGE(TAG, "failed! mbedtls_ssl_write returned -0x%x", -ret);
-                /* All other negative return values indicate connection needs to be reset.
-                * Will be caught in ping request so ignored here */
-                isErrorFlag = true;
-                break;
-            }
-        }
-        if(isErrorFlag) {
-            break;
-        }
-    }
-
-    if(isErrorFlag) {
+    bytesSent = mbedtls_ssl_write(&(tlsDataParams->ssl), pBuffer, bytesToSend);
+    if (bytesSent < 0) {
+        ESP_LOGE(TAG, "Failed to write, ret = -0x%0X", bytesSent);
         return -MBEDTLS_SSL_WRITE_ERROR;
-    } else if (written_so_far != len) {
-        return -MBEDTLS_SSL_WRITE_TIMEOUT_ERROR;
     }
 
-    return bytesToSend;
+    if (bytesSent < bytesToSend) {
+        ESP_LOGW(TAG, "Partial write, attempted %u, actual %u", bytesToSend, bytesSent);
+    }
+    return bytesSent;
 }
 
 int32_t Mbedtls_Recv( NetworkContext_t * pNetwork,
@@ -371,35 +351,18 @@ int32_t Mbedtls_Recv( NetworkContext_t * pNetwork,
                       size_t bytesToRecv ) {
     TLSDataParams *tlsDataParams = &(pNetwork->tlsDataParams);
     mbedtls_ssl_context *ssl = &(tlsDataParams->ssl);
-    size_t len = bytesToRecv;
-    size_t rxLen = 0;
-    int ret;
 
-    ESP_LOGD(TAG, "Attempting recv %u bytes", bytesToRecv);
-
-    while (len > 0) {
-        ret = mbedtls_ssl_read(ssl, pBuffer, len);
-
-        if (ret > 0) {
-            rxLen += ret;
-            pBuffer += ret;
-            len -= ret;
-        } else if (ret == 0 || (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE && ret != MBEDTLS_ERR_SSL_TIMEOUT)) {
-            ESP_LOGE(TAG, "ssl read failed, ret = %d", ret);
-            return -MBEDTLS_SSL_READ_ERROR;
-        }
-    }
-
-    ESP_LOGD(TAG, "ssl read, received %u bytes", rxLen);
-
-    if (len == 0) {
-        return rxLen;
-    }
-
-    if (rxLen == 0) {
-        return -MBEDTLS_SSL_NOTHING_TO_READ;
-    } else {
+    int32_t ret = mbedtls_ssl_read(ssl, pBuffer, bytesToRecv);
+    if (ret >= 0) {
+        return ret;
+    } else if (ret == MBEDTLS_ERR_SSL_WANT_READ) {
+        ESP_LOGW(TAG, "ssl read WANT_READ");
+        return 0;
+    } else if (ret == MBEDTLS_ERR_SSL_TIMEOUT) {
         return -MBEDTLS_SSL_READ_TIMEOUT_ERROR;
+    } else {
+        ESP_LOGE(TAG, "ssl read failed, ret = %d", ret);
+        return -MBEDTLS_SSL_READ_ERROR;
     }
 }
 
