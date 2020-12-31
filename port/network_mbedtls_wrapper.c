@@ -367,7 +367,7 @@ int32_t Mbedtls_Recv( NetworkContext_t * pNetwork,
 }
 
 static void _tls_destroy(const NetworkContext_t *pNetwork) {
-    TLSDataParams *tlsDataParams = &(pNetwork->tlsDataParams);
+    TLSDataParams *tlsDataParams = (TLSDataParams*)(&(pNetwork->tlsDataParams));
     mbedtls_net_free(&(tlsDataParams->server_fd));
     mbedtls_x509_crt_free(&(tlsDataParams->clicert));
     mbedtls_x509_crt_free(&(tlsDataParams->cacert));
@@ -379,7 +379,7 @@ static void _tls_destroy(const NetworkContext_t *pNetwork) {
 }
 
 MbedtlsStatus_t Mbedtls_Disconnect( const NetworkContext_t * pNetwork ) {
-    mbedtls_ssl_context *ssl = &(pNetwork->tlsDataParams.ssl);
+    mbedtls_ssl_context *ssl = (mbedtls_ssl_context*)(&(pNetwork->tlsDataParams.ssl));
     int ret = 0;
     do {
         ret = mbedtls_ssl_close_notify(ssl);

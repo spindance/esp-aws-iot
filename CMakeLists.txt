@@ -28,9 +28,6 @@ set(COMPONENT_SRCS
 
 set(COMPONENT_REQUIRES
     "mbedtls"
-    "pal"
 )
 
 register_component()
-
-component_compile_options("-DLOG_LOCAL_LEVEL=ESP_LOG_DEBUG")
