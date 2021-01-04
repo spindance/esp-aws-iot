@@ -80,6 +80,19 @@ MbedtlsStatus_t Mbedtls_Init(
     return MBEDTLS_SUCCESS;
 }
 
+static void _tls_destroy(const NetworkContext_t *pNetwork) {
+    TLSDataParams *tlsDataParams = (TLSDataParams*)(&(pNetwork->tlsDataParams));
+    mbedtls_net_free(&(tlsDataParams->server_fd));
+    mbedtls_x509_crt_free(&(tlsDataParams->clicert));
+    mbedtls_x509_crt_free(&(tlsDataParams->cacert));
+    mbedtls_pk_free(&(tlsDataParams->pkey));
+    mbedtls_ssl_free(&(tlsDataParams->ssl));
+    mbedtls_ssl_config_free(&(tlsDataParams->conf));
+    mbedtls_ctr_drbg_free(&(tlsDataParams->ctr_drbg));
+    mbedtls_entropy_free(&(tlsDataParams->entropy));
+}
+
+
 MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* params) {
     int ret = MBEDTLS_SUCCESS;
     TLSDataParams *tlsDataParams = NULL;
@@ -122,6 +135,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     if((ret = mbedtls_ctr_drbg_seed(&(tlsDataParams->ctr_drbg), mbedtls_entropy_func, &(tlsDataParams->entropy),
                                     (const unsigned char *) TAG, strlen(TAG))) != 0) {
         ESP_LOGE(TAG, "failed! mbedtls_ctr_drbg_seed returned -0x%x", -ret);
+        _tls_destroy(pNetwork);
         return MBEDTLS_ENTROPY_SOURCE_FAILED;
     }
 
@@ -142,6 +156,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
 
     if(ret < 0) {
         ESP_LOGE(TAG, "failed!  mbedtls_x509_crt_parse returned -0x%x while parsing root cert", -ret);
+        _tls_destroy(pNetwork);
         return MBEDTLS_ROOT_CRT_PARSE_ERROR;
     }
     ESP_LOGD(TAG, "ok (%d skipped)", ret);
@@ -171,6 +186,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     }
     if(ret != 0) {
         ESP_LOGE(TAG, "failed!  mbedtls_x509_crt_parse returned -0x%x while parsing device cert", -ret);
+        _tls_destroy(pNetwork);
         return MBEDTLS_DEVICE_CRT_PARSE_ERROR;
     }
 
@@ -204,6 +220,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     }
     if(ret != 0) {
         ESP_LOGE(TAG, "failed!  mbedtls_pk_parse_key returned -0x%x while parsing private key", -ret);
+        _tls_destroy(pNetwork);
         return MBEDTLS_PRIVATE_KEY_PARSE_ERROR;
     }
 
@@ -216,18 +233,23 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
         ESP_LOGE(TAG, "failed! mbedtls_net_connect returned -0x%x", -ret);
         switch(ret) {
             case MBEDTLS_ERR_NET_SOCKET_FAILED:
-                return MBEDTLS_SOCKET_FAILED;
+                ret = MBEDTLS_SOCKET_FAILED;
+                break;
             case MBEDTLS_ERR_NET_UNKNOWN_HOST:
-                return MBEDTLS_UNKNOWN_HOST;
+                ret = MBEDTLS_UNKNOWN_HOST;
+                break;
             case MBEDTLS_ERR_NET_CONNECT_FAILED:
             default:
-                return MBEDTLS_CONNECT_FAILED;
-        };
+                ret = MBEDTLS_CONNECT_FAILED;
+        }
+        _tls_destroy(pNetwork);
+        return ret;
     }
 
     ret = mbedtls_net_set_block(&(tlsDataParams->server_fd));
     if(ret != 0) {
         ESP_LOGE(TAG, "failed! net_set_(non)block() returned -0x%x", -ret);
+        _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     } ESP_LOGD(TAG, "ok");
 
@@ -235,6 +257,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     if((ret = mbedtls_ssl_config_defaults(&(tlsDataParams->conf), MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM,
                                           MBEDTLS_SSL_PRESET_DEFAULT)) != 0) {
         ESP_LOGE(TAG, "failed! mbedtls_ssl_config_defaults returned -0x%x", -ret);
+        _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
 
@@ -251,6 +274,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     ret = mbedtls_ssl_conf_own_cert(&(tlsDataParams->conf), &(tlsDataParams->clicert), &(tlsDataParams->pkey));
     if(ret != 0) {
         ESP_LOGE(TAG, "failed! mbedtls_ssl_conf_own_cert returned %d", ret);
+        _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
 
@@ -262,6 +286,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
         const char *alpnProtocols[] = { "x-amzn-mqtt-ca", NULL };
         if ((ret = mbedtls_ssl_conf_alpn_protocols(&(tlsDataParams->conf), alpnProtocols)) != 0) {
             ESP_LOGE(TAG, "failed! mbedtls_ssl_conf_alpn_protocols returned -0x%x", -ret);
+            _tls_destroy(pNetwork);
             return MBEDTLS_SSL_CONNECTION_ERROR;
         }
     }
@@ -269,10 +294,12 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
 
     if((ret = mbedtls_ssl_setup(&(tlsDataParams->ssl), &(tlsDataParams->conf))) != 0) {
         ESP_LOGE(TAG, "failed! mbedtls_ssl_setup returned -0x%x", -ret);
+        _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
     if((ret = mbedtls_ssl_set_hostname(&(tlsDataParams->ssl), pNetwork->tlsConnectParams.pDestinationURL)) != 0) {
         ESP_LOGE(TAG, "failed! mbedtls_ssl_set_hostname returned %d", ret);
+        _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
     ESP_LOGD(TAG, "SSL state connect : %d ", tlsDataParams->ssl.state);
@@ -288,6 +315,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
             if(ret == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED) {
                 ESP_LOGE(TAG, "    Unable to verify the server's certificate. ");
             }
+            _tls_destroy(pNetwork);
             return MBEDTLS_SSL_CONNECTION_ERROR;
         }
     }
@@ -323,6 +351,10 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
             mbedtls_x509_crt_info((char *) info_buf, sizeof(info_buf) - 1, "      ", mbedtls_ssl_get_peer_cert(&(tlsDataParams->ssl)));
             ESP_LOGD(TAG, "%s", info_buf);
         }
+    }
+
+    if (ret != MBEDTLS_SUCCESS) {
+        _tls_destroy(pNetwork);
     }
 
     return (MbedtlsStatus_t) ret;
@@ -364,18 +396,6 @@ int32_t Mbedtls_Recv( NetworkContext_t * pNetwork,
         ESP_LOGE(TAG, "ssl read failed, ret = %d", ret);
         return -MBEDTLS_SSL_READ_ERROR;
     }
-}
-
-static void _tls_destroy(const NetworkContext_t *pNetwork) {
-    TLSDataParams *tlsDataParams = (TLSDataParams*)(&(pNetwork->tlsDataParams));
-    mbedtls_net_free(&(tlsDataParams->server_fd));
-    mbedtls_x509_crt_free(&(tlsDataParams->clicert));
-    mbedtls_x509_crt_free(&(tlsDataParams->cacert));
-    mbedtls_pk_free(&(tlsDataParams->pkey));
-    mbedtls_ssl_free(&(tlsDataParams->ssl));
-    mbedtls_ssl_config_free(&(tlsDataParams->conf));
-    mbedtls_ctr_drbg_free(&(tlsDataParams->ctr_drbg));
-    mbedtls_entropy_free(&(tlsDataParams->entropy));
 }
 
 MbedtlsStatus_t Mbedtls_Disconnect( const NetworkContext_t * pNetwork ) {
