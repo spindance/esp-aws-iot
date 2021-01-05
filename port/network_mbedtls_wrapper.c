@@ -391,7 +391,9 @@ int32_t Mbedtls_Recv( NetworkContext_t * pNetwork,
         ESP_LOGW(TAG, "ssl read WANT_READ");
         return 0;
     } else if (ret == MBEDTLS_ERR_SSL_TIMEOUT) {
-        return -MBEDTLS_SSL_READ_TIMEOUT_ERROR;
+        // Not necessarily an error, just means we tried to read,
+        // but timed out without reading anything.
+        return 0;
     } else {
         ESP_LOGE(TAG, "ssl read failed, ret = %d", ret);
         return -MBEDTLS_SSL_READ_ERROR;
