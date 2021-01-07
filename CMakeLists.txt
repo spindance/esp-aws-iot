@@ -31,3 +31,8 @@ set(COMPONENT_REQUIRES
 )
 
 register_component()
+
+list(APPEND EXTRA_C_FLAGS_LIST
+    -Wno-type-limits
+)
+component_compile_options(${EXTRA_C_FLAGS_LIST})
