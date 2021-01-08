@@ -14,8 +14,6 @@
 #include "mbedtls/debug.h"
 #include "mbedtls/timing.h"
 
-// #define CONFIG_MBEDTLS_DEBUG
-
 typedef struct {
     const char *pRootCALocation;                ///< Pointer to string containing the filename (including path) of the root CA file.
     const char *pDeviceCertLocation;            ///< Pointer to string containing the filename (including path) of the device certificate.

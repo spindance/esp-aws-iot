@@ -122,7 +122,8 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     mbedtls_ssl_config_init(&(tlsDataParams->conf));
 
 #ifdef CONFIG_MBEDTLS_DEBUG
-    mbedtls_esp_enable_debug_log(&(tlsDataParams->conf), 4);
+    ESP_LOGW(TAG, "Enable mbedtls debug logging");
+    mbedtls_esp_enable_debug_log(&(tlsDataParams->conf), 1);
 #endif
 
     mbedtls_ctr_drbg_init(&(tlsDataParams->ctr_drbg));
@@ -309,8 +310,19 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
 
     ESP_LOGD(TAG, "SSL state connect : %d ", tlsDataParams->ssl.state);
     ESP_LOGD(TAG, "Performing the SSL/TLS handshake...");
+    uint32_t max_timeouts = 3;
+    uint32_t num_timeouts = 0;
     while((ret = mbedtls_ssl_handshake(&(tlsDataParams->ssl))) != 0) {
-        if(ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+        if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            // this is okay, try again
+        } else if (ret == MBEDTLS_ERR_SSL_TIMEOUT) {
+            num_timeouts++;
+            if (num_timeouts >= max_timeouts) {
+                ESP_LOGE(TAG, "failed! mbedtls_ssl_handshake returned -0x%x", -ret);
+                _tls_destroy(pNetwork);
+                return MBEDTLS_SSL_CONNECTION_ERROR;
+            }
+        } else {
             ESP_LOGE(TAG, "failed! mbedtls_ssl_handshake returned -0x%x", -ret);
             if(ret == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED) {
                 ESP_LOGE(TAG, "    Unable to verify the server's certificate. ");

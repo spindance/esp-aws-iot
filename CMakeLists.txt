@@ -32,6 +32,8 @@ set(COMPONENT_REQUIRES
 
 register_component()
 
+# component_compile_options("-DLOG_LOCAL_LEVEL=ESP_LOG_DEBUG")
+
 list(APPEND EXTRA_C_FLAGS_LIST
     -Wno-type-limits
 )
