@@ -7,7 +7,7 @@
 #endif
 
 #ifndef LIBRARY_LOG_LEVEL
-    #define LIBRARY_LOG_LEVEL    LOG_WARN
+    #define LIBRARY_LOG_LEVEL    AWS_LOG_WARN
 #endif
 
 #include "logging_stack.h"
