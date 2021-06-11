@@ -2,6 +2,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <log.h>
+
 #include "network_mbedtls_wrapper.h"
 #include "mbedtls/esp_debug.h"
 
@@ -11,10 +13,7 @@
 #include "tng_atcacert_client.h"
 #endif
 
-#include "esp_log.h"
 #include "esp_vfs.h"
-
-static const char *TAG = "aws_iot";
 
 /*
  * This is a function to do further verification if needed on the cert received.
@@ -25,16 +24,14 @@ static int _verify_cert(void *data, mbedtls_x509_crt *crt, int depth, uint32_t *
     char buf[256];
     ((void) data);
 
-    if (LOG_LOCAL_LEVEL >= ESP_LOG_DEBUG) {
-        ESP_LOGD(TAG, "Verify requested for (Depth %d):", depth);
-        mbedtls_x509_crt_info(buf, sizeof(buf) - 1, "", crt);
-        ESP_LOGD(TAG, "%s", buf);
+    log_debug("Verify requested for (Depth %d):", depth);
+    mbedtls_x509_crt_info(buf, sizeof(buf) - 1, "", crt);
+    log_debug("%s", buf);
 
-        if((*flags) == 0) {
-            ESP_LOGD(TAG, "  This certificate has no flags");
-        } else {
-            ESP_LOGD(TAG, "Verify result:%s", buf);
-        }
+    if((*flags) == 0) {
+        log_debug("  This certificate has no flags");
+    } else {
+        log_debug("Verify result:%s", buf);
     }
 
     return 0;
@@ -122,7 +119,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     mbedtls_ssl_config_init(&(tlsDataParams->conf));
 
 #ifdef CONFIG_MBEDTLS_DEBUG
-    ESP_LOGW(TAG, "Enable mbedtls debug logging");
+    log_warn("Enable mbedtls debug logging");
     mbedtls_esp_enable_debug_log(&(tlsDataParams->conf), 1);
 #endif
 
@@ -131,11 +128,10 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     mbedtls_x509_crt_init(&(tlsDataParams->clicert));
     mbedtls_pk_init(&(tlsDataParams->pkey));
 
-    ESP_LOGD(TAG, "Seeding the random number generator...");
+    log_debug("Seeding the random number generator...");
     mbedtls_entropy_init(&(tlsDataParams->entropy));
-    if((ret = mbedtls_ctr_drbg_seed(&(tlsDataParams->ctr_drbg), mbedtls_entropy_func, &(tlsDataParams->entropy),
-                                    (const unsigned char *) TAG, strlen(TAG))) != 0) {
-        ESP_LOGE(TAG, "failed! mbedtls_ctr_drbg_seed returned -0x%x", -ret);
+    if((ret = mbedtls_ctr_drbg_seed(&(tlsDataParams->ctr_drbg), mbedtls_entropy_func, &(tlsDataParams->entropy), NULL, 0)) != 0) {
+        log_error("failed! mbedtls_ctr_drbg_seed returned -0x%x", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_ENTROPY_SOURCE_FAILED;
     }
@@ -147,46 +143,46 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
        path, if it's longer than this then it's raw cert data (PEM or DER,
        neither of which can start with a slash. */
     if (pNetwork->tlsConnectParams.pRootCALocation[0] == '/') {
-        ESP_LOGD(TAG, "Loading CA root certificate from file ...");
+        log_debug("Loading CA root certificate from file ...");
         ret = mbedtls_x509_crt_parse_file(&(tlsDataParams->cacert), pNetwork->tlsConnectParams.pRootCALocation);
     } else {
-        ESP_LOGD(TAG, "Loading embedded CA root certificate ...");
+        log_debug("Loading embedded CA root certificate ...");
         ret = mbedtls_x509_crt_parse(&(tlsDataParams->cacert), (const unsigned char *)pNetwork->tlsConnectParams.pRootCALocation,
                                  strlen(pNetwork->tlsConnectParams.pRootCALocation)+1);
     }
 
     if(ret < 0) {
-        ESP_LOGE(TAG, "failed!  mbedtls_x509_crt_parse returned -0x%x while parsing root cert", -ret);
+        log_error("failed!  mbedtls_x509_crt_parse returned -0x%x while parsing root cert", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_ROOT_CRT_PARSE_ERROR;
     }
-    ESP_LOGD(TAG, "ok (%d skipped)", ret);
+    log_debug("ok (%d skipped)", ret);
 
     /* Load client certificate... */
 #ifdef CONFIG_AWS_IOT_USE_HARDWARE_SECURE_ELEMENT
     if (pNetwork->tlsConnectParams.pDeviceCertLocation[0] == '#') {
         const atcacert_def_t* cert_def = NULL;
-        ESP_LOGD(TAG, "Using certificate stored in ATECC608A");
+        log_debug("Using certificate stored in ATECC608A");
         ret = tng_get_device_cert_def(&cert_def);
         if (ret == 0) {
             ret = atca_mbedtls_cert_add(&(tlsDataParams->clicert), cert_def);
         } else {
-            ESP_LOGE(TAG, "failed! could not load cert from ATECC608A, tng_get_device_cert_def returned %02x", ret);
+            log_error("failed! could not load cert from ATECC608A, tng_get_device_cert_def returned %02x", ret);
         }
     } else
 #endif
     if (pNetwork->tlsConnectParams.pDeviceCertLocation[0] == '/') {
-        ESP_LOGD(TAG, "Loading client cert from file...");
+        log_debug("Loading client cert from file...");
         ret = mbedtls_x509_crt_parse_file(&(tlsDataParams->clicert),
                                           pNetwork->tlsConnectParams.pDeviceCertLocation);
     } else {
-        ESP_LOGD(TAG, "Loading embedded client certificate...");
+        log_debug("Loading embedded client certificate...");
         ret = mbedtls_x509_crt_parse(&(tlsDataParams->clicert),
                                      (const unsigned char *)pNetwork->tlsConnectParams.pDeviceCertLocation,
                                      strlen(pNetwork->tlsConnectParams.pDeviceCertLocation)+1);
     }
     if(ret != 0) {
-        ESP_LOGE(TAG, "failed!  mbedtls_x509_crt_parse returned -0x%x while parsing device cert", -ret);
+        log_error("failed!  mbedtls_x509_crt_parse returned -0x%x while parsing device cert", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_DEVICE_CRT_PARSE_ERROR;
     }
@@ -196,42 +192,42 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     if (pNetwork->tlsConnectParams.pDevicePrivateKeyLocation[0] == '#') {
         int8_t slot_id = pNetwork->tlsConnectParams.pDevicePrivateKeyLocation[1] - '0';
         if (slot_id < 0 || slot_id > 9) {
-            ESP_LOGE(TAG, "Invalid ATECC608A slot ID.");
+            log_error("Invalid ATECC608A slot ID.");
             ret = NETWORK_PK_PRIVATE_KEY_PARSE_ERROR;
         } else {
-            ESP_LOGD(TAG, "Using ATECC608A private key from slot %d", slot_id);
+            log_debug("Using ATECC608A private key from slot %d", slot_id);
             ret = atca_mbedtls_pk_init(&(tlsDataParams->pkey), slot_id);
             if (ret != 0) {
-                ESP_LOGE(TAG, "failed !  atca_mbedtls_pk_init returned %02x", ret);
+                log_error("failed !  atca_mbedtls_pk_init returned %02x", ret);
             }
         }
     } else
 #endif
     if (pNetwork->tlsConnectParams.pDevicePrivateKeyLocation[0] == '/') {
-        ESP_LOGD(TAG, "Loading client private key from file...");
+        log_debug("Loading client private key from file...");
         ret = mbedtls_pk_parse_keyfile(&(tlsDataParams->pkey),
                                        pNetwork->tlsConnectParams.pDevicePrivateKeyLocation,
                                        "");
     } else {
-        ESP_LOGD(TAG, "Loading embedded client private key...");
+        log_debug("Loading embedded client private key...");
         ret = mbedtls_pk_parse_key(&(tlsDataParams->pkey),
                                    (const unsigned char *)pNetwork->tlsConnectParams.pDevicePrivateKeyLocation,
                                    strlen(pNetwork->tlsConnectParams.pDevicePrivateKeyLocation)+1,
                                    (const unsigned char *)"", 0);
     }
     if(ret != 0) {
-        ESP_LOGE(TAG, "failed!  mbedtls_pk_parse_key returned -0x%x while parsing private key", -ret);
+        log_error("failed!  mbedtls_pk_parse_key returned -0x%x while parsing private key", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_PRIVATE_KEY_PARSE_ERROR;
     }
 
     /* Done parsing certs */
-    ESP_LOGD(TAG, "ok");
+    log_debug("ok");
     snprintf(portBuffer, 6, "%d", pNetwork->tlsConnectParams.DestinationPort);
-    ESP_LOGD(TAG, "Connecting to %s/%s...", pNetwork->tlsConnectParams.pDestinationURL, portBuffer);
+    log_debug("Connecting to %s/%s...", pNetwork->tlsConnectParams.pDestinationURL, portBuffer);
     if((ret = mbedtls_net_connect(&(tlsDataParams->server_fd), pNetwork->tlsConnectParams.pDestinationURL,
                                   portBuffer, MBEDTLS_NET_PROTO_TCP)) != 0) {
-        ESP_LOGE(TAG, "failed! mbedtls_net_connect returned -0x%x", -ret);
+        log_error("failed! mbedtls_net_connect returned -0x%x", -ret);
         switch(ret) {
             case MBEDTLS_ERR_NET_SOCKET_FAILED:
                 ret = MBEDTLS_SOCKET_FAILED;
@@ -249,15 +245,15 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
 
     ret = mbedtls_net_set_block(&(tlsDataParams->server_fd));
     if(ret != 0) {
-        ESP_LOGE(TAG, "failed! net_set_(non)block() returned -0x%x", -ret);
+        log_error("failed! net_set_(non)block() returned -0x%x", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
-    } ESP_LOGD(TAG, "ok");
+    } log_debug("ok");
 
-    ESP_LOGD(TAG, "Setting up the SSL/TLS structure...");
+    log_debug("Setting up the SSL/TLS structure...");
     if((ret = mbedtls_ssl_config_defaults(&(tlsDataParams->conf), MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM,
                                           MBEDTLS_SSL_PRESET_DEFAULT)) != 0) {
-        ESP_LOGE(TAG, "failed! mbedtls_ssl_config_defaults returned -0x%x", -ret);
+        log_error("failed! mbedtls_ssl_config_defaults returned -0x%x", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
@@ -274,7 +270,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     mbedtls_ssl_conf_ca_chain(&(tlsDataParams->conf), &(tlsDataParams->cacert), NULL);
     ret = mbedtls_ssl_conf_own_cert(&(tlsDataParams->conf), &(tlsDataParams->clicert), &(tlsDataParams->pkey));
     if(ret != 0) {
-        ESP_LOGE(TAG, "failed! mbedtls_ssl_conf_own_cert returned %d", ret);
+        log_error("failed! mbedtls_ssl_conf_own_cert returned %d", ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
@@ -286,7 +282,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     if (pNetwork->tlsConnectParams.DestinationPort == 443) {
         const char *alpnProtocols[] = { "x-amzn-mqtt-ca", NULL };
         if ((ret = mbedtls_ssl_conf_alpn_protocols(&(tlsDataParams->conf), alpnProtocols)) != 0) {
-            ESP_LOGE(TAG, "failed! mbedtls_ssl_conf_alpn_protocols returned -0x%x", -ret);
+            log_error("failed! mbedtls_ssl_conf_alpn_protocols returned -0x%x", -ret);
             _tls_destroy(pNetwork);
             return MBEDTLS_SSL_CONNECTION_ERROR;
         }
@@ -294,22 +290,22 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
 #endif
 
     if((ret = mbedtls_ssl_setup(&(tlsDataParams->ssl), &(tlsDataParams->conf))) != 0) {
-        ESP_LOGE(TAG, "failed! mbedtls_ssl_setup returned -0x%x", -ret);
+        log_error("failed! mbedtls_ssl_setup returned -0x%x", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
     if((ret = mbedtls_ssl_set_hostname(&(tlsDataParams->ssl), pNetwork->tlsConnectParams.pDestinationURL)) != 0) {
-        ESP_LOGE(TAG, "failed! mbedtls_ssl_set_hostname returned %d", ret);
+        log_error("failed! mbedtls_ssl_set_hostname returned %d", ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
-    ESP_LOGD(TAG, "SSL state connect : %d ", tlsDataParams->ssl.state);
+    log_debug("SSL state connect : %d ", tlsDataParams->ssl.state);
     mbedtls_ssl_set_bio(&(tlsDataParams->ssl), &(tlsDataParams->server_fd), mbedtls_net_send, NULL,
                         mbedtls_net_recv_timeout);
-    ESP_LOGD(TAG, "ok");
+    log_debug("ok");
 
-    ESP_LOGD(TAG, "SSL state connect : %d ", tlsDataParams->ssl.state);
-    ESP_LOGD(TAG, "Performing the SSL/TLS handshake...");
+    log_debug("SSL state connect : %d ", tlsDataParams->ssl.state);
+    log_debug("Performing the SSL/TLS handshake...");
     uint32_t max_timeouts = 3;
     uint32_t num_timeouts = 0;
     while((ret = mbedtls_ssl_handshake(&(tlsDataParams->ssl))) != 0) {
@@ -318,51 +314,49 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
         } else if (ret == MBEDTLS_ERR_SSL_TIMEOUT) {
             num_timeouts++;
             if (num_timeouts >= max_timeouts) {
-                ESP_LOGE(TAG, "failed! mbedtls_ssl_handshake returned -0x%x", -ret);
+                log_error("failed! mbedtls_ssl_handshake returned -0x%x", -ret);
                 _tls_destroy(pNetwork);
                 return MBEDTLS_SSL_CONNECTION_ERROR;
             }
         } else {
-            ESP_LOGE(TAG, "failed! mbedtls_ssl_handshake returned -0x%x", -ret);
+            log_error("failed! mbedtls_ssl_handshake returned -0x%x", -ret);
             if(ret == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED) {
-                ESP_LOGE(TAG, "    Unable to verify the server's certificate. ");
+                log_error("    Unable to verify the server's certificate. ");
             }
             _tls_destroy(pNetwork);
             return MBEDTLS_SSL_CONNECTION_ERROR;
         }
     }
 
-    ESP_LOGD(TAG, "ok    [ Protocol is %s ]    [ Ciphersuite is %s ]", mbedtls_ssl_get_version(&(tlsDataParams->ssl)),
+    log_debug("ok    [ Protocol is %s ]    [ Ciphersuite is %s ]", mbedtls_ssl_get_version(&(tlsDataParams->ssl)),
           mbedtls_ssl_get_ciphersuite(&(tlsDataParams->ssl)));
     if((ret = mbedtls_ssl_get_record_expansion(&(tlsDataParams->ssl))) >= 0) {
-        ESP_LOGD(TAG, "    [ Record expansion is %d ]", ret);
+        log_debug("    [ Record expansion is %d ]", ret);
     } else {
-        ESP_LOGD(TAG, "    [ Record expansion is unknown (compression) ]");
+        log_debug("    [ Record expansion is unknown (compression) ]");
     }
 
-    ESP_LOGD(TAG, "Verifying peer X.509 certificate...");
+    log_debug("Verifying peer X.509 certificate...");
 
     if(pNetwork->tlsConnectParams.ServerVerificationFlag == true) {
         if((tlsDataParams->flags = mbedtls_ssl_get_verify_result(&(tlsDataParams->ssl))) != 0) {
-            ESP_LOGE(TAG, "failed");
+            log_error("failed");
             mbedtls_x509_crt_verify_info(info_buf, sizeof(info_buf), "  ! ", tlsDataParams->flags);
-            ESP_LOGE(TAG, "%s", info_buf);
+            log_error("%s", info_buf);
             ret = MBEDTLS_SSL_CONNECTION_ERROR;
         } else {
-            ESP_LOGD(TAG, "ok");
+            log_debug("ok");
             ret = MBEDTLS_SUCCESS;
         }
     } else {
-        ESP_LOGW(TAG, " Server Verification skipped");
+        log_warn(" Server Verification skipped");
         ret = MBEDTLS_SUCCESS;
     }
 
-    if(LOG_LOCAL_LEVEL >= ESP_LOG_DEBUG) {
-        if (mbedtls_ssl_get_peer_cert(&(tlsDataParams->ssl)) != NULL) {
-            ESP_LOGD(TAG, "Peer certificate information:");
-            mbedtls_x509_crt_info((char *) info_buf, sizeof(info_buf) - 1, "      ", mbedtls_ssl_get_peer_cert(&(tlsDataParams->ssl)));
-            ESP_LOGD(TAG, "%s", info_buf);
-        }
+    if (mbedtls_ssl_get_peer_cert(&(tlsDataParams->ssl)) != NULL) {
+        log_debug("Peer certificate information:");
+        mbedtls_x509_crt_info((char *) info_buf, sizeof(info_buf) - 1, "      ", mbedtls_ssl_get_peer_cert(&(tlsDataParams->ssl)));
+        log_debug("%s", info_buf);
     }
 
     if (ret != MBEDTLS_SUCCESS) {
@@ -380,12 +374,12 @@ int32_t Mbedtls_Send( NetworkContext_t * pNetwork,
 
     bytesSent = mbedtls_ssl_write(&(tlsDataParams->ssl), pBuffer, bytesToSend);
     if (bytesSent < 0) {
-        ESP_LOGE(TAG, "Failed to write, ret = -0x%0X", bytesSent);
+        log_error("Failed to write, ret = -0x%0X", bytesSent);
         return -MBEDTLS_SSL_WRITE_ERROR;
     }
 
     if (bytesSent < bytesToSend) {
-        ESP_LOGW(TAG, "Partial write, attempted %u, actual %u", bytesToSend, bytesSent);
+        log_warn("Partial write, attempted %u, actual %u", bytesToSend, bytesSent);
     }
     return bytesSent;
 }
@@ -400,14 +394,14 @@ int32_t Mbedtls_Recv( NetworkContext_t * pNetwork,
     if (ret >= 0) {
         return ret;
     } else if (ret == MBEDTLS_ERR_SSL_WANT_READ) {
-        ESP_LOGW(TAG, "ssl read WANT_READ");
+        log_warn("ssl read WANT_READ");
         return 0;
     } else if (ret == MBEDTLS_ERR_SSL_TIMEOUT) {
         // Not necessarily an error, just means we tried to read,
         // but timed out without reading anything.
         return 0;
     } else {
-        ESP_LOGE(TAG, "ssl read failed, ret = %d", ret);
+        log_error("ssl read failed, ret = %d", ret);
         return -MBEDTLS_SSL_READ_ERROR;
     }
 }
