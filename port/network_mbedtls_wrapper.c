@@ -15,6 +15,8 @@
 
 #include "esp_vfs.h"
 
+#define TAG "network_mbedtls_wrapper"
+
 /*
  * This is a function to do further verification if needed on the cert received.
  *
@@ -24,14 +26,14 @@ static int _verify_cert(void *data, mbedtls_x509_crt *crt, int depth, uint32_t *
     char buf[256];
     ((void) data);
 
-    log_trace("Verify requested for (Depth %d):", depth);
+    log_trace(TAG, "Verify requested for (Depth %d):", depth);
     mbedtls_x509_crt_info(buf, sizeof(buf) - 1, "", crt);
-    log_trace("%s", buf);
+    log_trace(TAG, "%s", buf);
 
     if((*flags) == 0) {
-        log_trace("  This certificate has no flags");
+        log_trace(TAG, "  This certificate has no flags");
     } else {
-        log_trace("Verify result:%s", buf);
+        log_trace(TAG, "Verify result:%s", buf);
     }
 
     return 0;
@@ -119,7 +121,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     mbedtls_ssl_config_init(&(tlsDataParams->conf));
 
 #ifdef CONFIG_MBEDTLS_DEBUG
-    log_warn("Enable mbedtls debug logging");
+    log_warn(TAG, "Enable mbedtls debug logging");
     mbedtls_esp_enable_debug_log(&(tlsDataParams->conf), 1);
 #endif
 
@@ -128,10 +130,10 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     mbedtls_x509_crt_init(&(tlsDataParams->clicert));
     mbedtls_pk_init(&(tlsDataParams->pkey));
 
-    log_trace("Seeding the random number generator...");
+    log_trace(TAG, "Seeding the random number generator...");
     mbedtls_entropy_init(&(tlsDataParams->entropy));
     if((ret = mbedtls_ctr_drbg_seed(&(tlsDataParams->ctr_drbg), mbedtls_entropy_func, &(tlsDataParams->entropy), NULL, 0)) != 0) {
-        log_error("failed! mbedtls_ctr_drbg_seed returned -0x%x", -ret);
+        log_error(TAG, "failed! mbedtls_ctr_drbg_seed returned -0x%x", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_ENTROPY_SOURCE_FAILED;
     }
@@ -143,46 +145,46 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
        path, if it's longer than this then it's raw cert data (PEM or DER,
        neither of which can start with a slash. */
     if (pNetwork->tlsConnectParams.pRootCALocation[0] == '/') {
-        log_trace("Loading CA root certificate from file ...");
+        log_trace(TAG, "Loading CA root certificate from file ...");
         ret = mbedtls_x509_crt_parse_file(&(tlsDataParams->cacert), pNetwork->tlsConnectParams.pRootCALocation);
     } else {
-        log_trace("Loading embedded CA root certificate ...");
+        log_trace(TAG, "Loading embedded CA root certificate ...");
         ret = mbedtls_x509_crt_parse(&(tlsDataParams->cacert), (const unsigned char *)pNetwork->tlsConnectParams.pRootCALocation,
                                  strlen(pNetwork->tlsConnectParams.pRootCALocation)+1);
     }
 
     if(ret < 0) {
-        log_error("failed!  mbedtls_x509_crt_parse returned -0x%x while parsing root cert", -ret);
+        log_error(TAG, "failed!  mbedtls_x509_crt_parse returned -0x%x while parsing root cert", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_ROOT_CRT_PARSE_ERROR;
     }
-    log_trace("ok (%d skipped)", ret);
+    log_trace(TAG, "ok (%d skipped)", ret);
 
     /* Load client certificate... */
 #ifdef CONFIG_AWS_IOT_USE_HARDWARE_SECURE_ELEMENT
     if (pNetwork->tlsConnectParams.pDeviceCertLocation[0] == '#') {
         const atcacert_def_t* cert_def = NULL;
-        log_trace("Using certificate stored in ATECC608A");
+        log_trace(TAG, "Using certificate stored in ATECC608A");
         ret = tng_get_device_cert_def(&cert_def);
         if (ret == 0) {
             ret = atca_mbedtls_cert_add(&(tlsDataParams->clicert), cert_def);
         } else {
-            log_error("failed! could not load cert from ATECC608A, tng_get_device_cert_def returned %02x", ret);
+            log_error(TAG, "failed! could not load cert from ATECC608A, tng_get_device_cert_def returned %02x", ret);
         }
     } else
 #endif
     if (pNetwork->tlsConnectParams.pDeviceCertLocation[0] == '/') {
-        log_trace("Loading client cert from file...");
+        log_trace(TAG, "Loading client cert from file...");
         ret = mbedtls_x509_crt_parse_file(&(tlsDataParams->clicert),
                                           pNetwork->tlsConnectParams.pDeviceCertLocation);
     } else {
-        log_trace("Loading embedded client certificate...");
+        log_trace(TAG, "Loading embedded client certificate...");
         ret = mbedtls_x509_crt_parse(&(tlsDataParams->clicert),
                                      (const unsigned char *)pNetwork->tlsConnectParams.pDeviceCertLocation,
                                      strlen(pNetwork->tlsConnectParams.pDeviceCertLocation)+1);
     }
     if(ret != 0) {
-        log_error("failed!  mbedtls_x509_crt_parse returned -0x%x while parsing device cert", -ret);
+        log_error(TAG, "failed!  mbedtls_x509_crt_parse returned -0x%x while parsing device cert", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_DEVICE_CRT_PARSE_ERROR;
     }
@@ -192,42 +194,42 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     if (pNetwork->tlsConnectParams.pDevicePrivateKeyLocation[0] == '#') {
         int8_t slot_id = pNetwork->tlsConnectParams.pDevicePrivateKeyLocation[1] - '0';
         if (slot_id < 0 || slot_id > 9) {
-            log_error("Invalid ATECC608A slot ID.");
+            log_error(TAG, "Invalid ATECC608A slot ID.");
             ret = NETWORK_PK_PRIVATE_KEY_PARSE_ERROR;
         } else {
-            log_trace("Using ATECC608A private key from slot %d", slot_id);
+            log_trace(TAG, "Using ATECC608A private key from slot %d", slot_id);
             ret = atca_mbedtls_pk_init(&(tlsDataParams->pkey), slot_id);
             if (ret != 0) {
-                log_error("failed !  atca_mbedtls_pk_init returned %02x", ret);
+                log_error(TAG, "failed !  atca_mbedtls_pk_init returned %02x", ret);
             }
         }
     } else
 #endif
     if (pNetwork->tlsConnectParams.pDevicePrivateKeyLocation[0] == '/') {
-        log_trace("Loading client private key from file...");
+        log_trace(TAG, "Loading client private key from file...");
         ret = mbedtls_pk_parse_keyfile(&(tlsDataParams->pkey),
                                        pNetwork->tlsConnectParams.pDevicePrivateKeyLocation,
                                        "");
     } else {
-        log_trace("Loading embedded client private key...");
+        log_trace(TAG, "Loading embedded client private key...");
         ret = mbedtls_pk_parse_key(&(tlsDataParams->pkey),
                                    (const unsigned char *)pNetwork->tlsConnectParams.pDevicePrivateKeyLocation,
                                    strlen(pNetwork->tlsConnectParams.pDevicePrivateKeyLocation)+1,
                                    (const unsigned char *)"", 0);
     }
     if(ret != 0) {
-        log_error("failed!  mbedtls_pk_parse_key returned -0x%x while parsing private key", -ret);
+        log_error(TAG, "failed!  mbedtls_pk_parse_key returned -0x%x while parsing private key", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_PRIVATE_KEY_PARSE_ERROR;
     }
 
     /* Done parsing certs */
-    log_trace("ok");
+    log_trace(TAG, "ok");
     snprintf(portBuffer, 6, "%d", pNetwork->tlsConnectParams.DestinationPort);
-    log_trace("Connecting to %s/%s...", pNetwork->tlsConnectParams.pDestinationURL, portBuffer);
+    log_trace(TAG, "Connecting to %s/%s...", pNetwork->tlsConnectParams.pDestinationURL, portBuffer);
     if((ret = mbedtls_net_connect(&(tlsDataParams->server_fd), pNetwork->tlsConnectParams.pDestinationURL,
                                   portBuffer, MBEDTLS_NET_PROTO_TCP)) != 0) {
-        log_error("failed! mbedtls_net_connect returned -0x%x", -ret);
+        log_error(TAG, "failed! mbedtls_net_connect returned -0x%x", -ret);
         switch(ret) {
             case MBEDTLS_ERR_NET_SOCKET_FAILED:
                 ret = MBEDTLS_SOCKET_FAILED;
@@ -245,15 +247,15 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
 
     ret = mbedtls_net_set_block(&(tlsDataParams->server_fd));
     if(ret != 0) {
-        log_error("failed! net_set_(non)block() returned -0x%x", -ret);
+        log_error(TAG, "failed! net_set_(non)block() returned -0x%x", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
-    } log_trace("ok");
+    } log_trace(TAG, "ok");
 
-    log_trace("Setting up the SSL/TLS structure...");
+    log_trace(TAG, "Setting up the SSL/TLS structure...");
     if((ret = mbedtls_ssl_config_defaults(&(tlsDataParams->conf), MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM,
                                           MBEDTLS_SSL_PRESET_DEFAULT)) != 0) {
-        log_error("failed! mbedtls_ssl_config_defaults returned -0x%x", -ret);
+        log_error(TAG, "failed! mbedtls_ssl_config_defaults returned -0x%x", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
@@ -270,7 +272,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     mbedtls_ssl_conf_ca_chain(&(tlsDataParams->conf), &(tlsDataParams->cacert), NULL);
     ret = mbedtls_ssl_conf_own_cert(&(tlsDataParams->conf), &(tlsDataParams->clicert), &(tlsDataParams->pkey));
     if(ret != 0) {
-        log_error("failed! mbedtls_ssl_conf_own_cert returned %d", ret);
+        log_error(TAG, "failed! mbedtls_ssl_conf_own_cert returned %d", ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
@@ -282,7 +284,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
     if (pNetwork->tlsConnectParams.DestinationPort == 443) {
         const char *alpnProtocols[] = { "x-amzn-mqtt-ca", NULL };
         if ((ret = mbedtls_ssl_conf_alpn_protocols(&(tlsDataParams->conf), alpnProtocols)) != 0) {
-            log_error("failed! mbedtls_ssl_conf_alpn_protocols returned -0x%x", -ret);
+            log_error(TAG, "failed! mbedtls_ssl_conf_alpn_protocols returned -0x%x", -ret);
             _tls_destroy(pNetwork);
             return MBEDTLS_SSL_CONNECTION_ERROR;
         }
@@ -290,22 +292,22 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
 #endif
 
     if((ret = mbedtls_ssl_setup(&(tlsDataParams->ssl), &(tlsDataParams->conf))) != 0) {
-        log_error("failed! mbedtls_ssl_setup returned -0x%x", -ret);
+        log_error(TAG, "failed! mbedtls_ssl_setup returned -0x%x", -ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
     if((ret = mbedtls_ssl_set_hostname(&(tlsDataParams->ssl), pNetwork->tlsConnectParams.pDestinationURL)) != 0) {
-        log_error("failed! mbedtls_ssl_set_hostname returned %d", ret);
+        log_error(TAG, "failed! mbedtls_ssl_set_hostname returned %d", ret);
         _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
-    log_trace("SSL state connect : %d ", tlsDataParams->ssl.state);
+    log_trace(TAG, "SSL state connect : %d ", tlsDataParams->ssl.state);
     mbedtls_ssl_set_bio(&(tlsDataParams->ssl), &(tlsDataParams->server_fd), mbedtls_net_send, NULL,
                         mbedtls_net_recv_timeout);
-    log_trace("ok");
+    log_trace(TAG, "ok");
 
-    log_trace("SSL state connect : %d ", tlsDataParams->ssl.state);
-    log_trace("Performing the SSL/TLS handshake...");
+    log_trace(TAG, "SSL state connect : %d ", tlsDataParams->ssl.state);
+    log_trace(TAG, "Performing the SSL/TLS handshake...");
     uint32_t max_timeouts = 3;
     uint32_t num_timeouts = 0;
     while((ret = mbedtls_ssl_handshake(&(tlsDataParams->ssl))) != 0) {
@@ -314,49 +316,49 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
         } else if (ret == MBEDTLS_ERR_SSL_TIMEOUT) {
             num_timeouts++;
             if (num_timeouts >= max_timeouts) {
-                log_error("failed! mbedtls_ssl_handshake returned -0x%x", -ret);
+                log_error(TAG, "failed! mbedtls_ssl_handshake returned -0x%x", -ret);
                 _tls_destroy(pNetwork);
                 return MBEDTLS_SSL_CONNECTION_ERROR;
             }
         } else {
-            log_error("failed! mbedtls_ssl_handshake returned -0x%x", -ret);
+            log_error(TAG, "failed! mbedtls_ssl_handshake returned -0x%x", -ret);
             if(ret == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED) {
-                log_error("    Unable to verify the server's certificate. ");
+                log_error(TAG, "    Unable to verify the server's certificate. ");
             }
             _tls_destroy(pNetwork);
             return MBEDTLS_SSL_CONNECTION_ERROR;
         }
     }
 
-    log_trace("ok    [ Protocol is %s ]    [ Ciphersuite is %s ]", mbedtls_ssl_get_version(&(tlsDataParams->ssl)),
+    log_trace(TAG, "ok    [ Protocol is %s ]    [ Ciphersuite is %s ]", mbedtls_ssl_get_version(&(tlsDataParams->ssl)),
           mbedtls_ssl_get_ciphersuite(&(tlsDataParams->ssl)));
     if((ret = mbedtls_ssl_get_record_expansion(&(tlsDataParams->ssl))) >= 0) {
-        log_trace("    [ Record expansion is %d ]", ret);
+        log_trace(TAG, "    [ Record expansion is %d ]", ret);
     } else {
-        log_trace("    [ Record expansion is unknown (compression) ]");
+        log_trace(TAG, "    [ Record expansion is unknown (compression) ]");
     }
 
-    log_trace("Verifying peer X.509 certificate...");
+    log_trace(TAG, "Verifying peer X.509 certificate...");
 
     if(pNetwork->tlsConnectParams.ServerVerificationFlag == true) {
         if((tlsDataParams->flags = mbedtls_ssl_get_verify_result(&(tlsDataParams->ssl))) != 0) {
-            log_error("failed");
+            log_error(TAG, "failed");
             mbedtls_x509_crt_verify_info(info_buf, sizeof(info_buf), "  ! ", tlsDataParams->flags);
-            log_error("%s", info_buf);
+            log_error(TAG, "%s", info_buf);
             ret = MBEDTLS_SSL_CONNECTION_ERROR;
         } else {
-            log_trace("ok");
+            log_trace(TAG, "ok");
             ret = MBEDTLS_SUCCESS;
         }
     } else {
-        log_warn(" Server Verification skipped");
+        log_warn(TAG, " Server Verification skipped");
         ret = MBEDTLS_SUCCESS;
     }
 
     if (mbedtls_ssl_get_peer_cert(&(tlsDataParams->ssl)) != NULL) {
-        log_trace("Peer certificate information:");
+        log_trace(TAG, "Peer certificate information:");
         mbedtls_x509_crt_info((char *) info_buf, sizeof(info_buf) - 1, "      ", mbedtls_ssl_get_peer_cert(&(tlsDataParams->ssl)));
-        log_trace("%s", info_buf);
+        log_trace(TAG, "%s", info_buf);
     }
 
     if (ret != MBEDTLS_SUCCESS) {
@@ -374,12 +376,12 @@ int32_t Mbedtls_Send( NetworkContext_t * pNetwork,
 
     bytesSent = mbedtls_ssl_write(&(tlsDataParams->ssl), pBuffer, bytesToSend);
     if (bytesSent < 0) {
-        log_error("Failed to write, ret = -0x%0X", bytesSent);
+        log_error(TAG, "Failed to write, ret = -0x%0X", bytesSent);
         return -MBEDTLS_SSL_WRITE_ERROR;
     }
 
     if (bytesSent < bytesToSend) {
-        log_warn("Partial write, attempted %u, actual %u", bytesToSend, bytesSent);
+        log_warn(TAG, "Partial write, attempted %u, actual %u", bytesToSend, bytesSent);
     }
     return bytesSent;
 }
@@ -394,14 +396,14 @@ int32_t Mbedtls_Recv( NetworkContext_t * pNetwork,
     if (ret >= 0) {
         return ret;
     } else if (ret == MBEDTLS_ERR_SSL_WANT_READ) {
-        log_warn("ssl read WANT_READ");
+        log_warn(TAG, "ssl read WANT_READ");
         return 0;
     } else if (ret == MBEDTLS_ERR_SSL_TIMEOUT) {
         // Not necessarily an error, just means we tried to read,
         // but timed out without reading anything.
         return 0;
     } else {
-        log_error("ssl read failed, ret = %d", ret);
+        log_error(TAG, "ssl read failed, ret = %d", ret);
         return -MBEDTLS_SSL_READ_ERROR;
     }
 }
