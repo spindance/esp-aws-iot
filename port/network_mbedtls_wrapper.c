@@ -13,9 +13,17 @@
 #include "tng_atcacert_client.h"
 #endif
 
-#include "esp_vfs.h"
-
 #define TAG "network_mbedtls_wrapper"
+
+// v5.0 TODO
+// This needs to be a "properly seeded, cryptographically secure RNG"
+static int get_random(void* p_rng, unsigned char* buf, size_t len) {
+    (void)p_rng;
+    while (len-- && (buf != NULL)) {
+        *buf++ = (uint8_t)(rand() & 0xFF);
+    }
+    return 0;
+}
 
 /*
  * This is a function to do further verification if needed on the cert received.
@@ -209,13 +217,18 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
         log_trace(TAG, "Loading client private key from file...");
         ret = mbedtls_pk_parse_keyfile(&(tlsDataParams->pkey),
                                        pNetwork->tlsConnectParams.pDevicePrivateKeyLocation,
-                                       "");
+                                       "",
+                                       get_random,
+                                       NULL);
     } else {
         log_trace(TAG, "Loading embedded client private key...");
         ret = mbedtls_pk_parse_key(&(tlsDataParams->pkey),
                                    (const unsigned char *)pNetwork->tlsConnectParams.pDevicePrivateKeyLocation,
                                    strlen(pNetwork->tlsConnectParams.pDevicePrivateKeyLocation)+1,
-                                   (const unsigned char *)"", 0);
+                                   (const unsigned char *)"",
+                                   0,
+                                   get_random,
+                                   NULL);
     }
     if(ret != 0) {
         log_error(TAG, "failed!  mbedtls_pk_parse_key returned -0x%x while parsing private key", -ret);
@@ -301,12 +314,10 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
         _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
-    log_trace(TAG, "SSL state connect : %d ", tlsDataParams->ssl.state);
     mbedtls_ssl_set_bio(&(tlsDataParams->ssl), &(tlsDataParams->server_fd), mbedtls_net_send, NULL,
                         mbedtls_net_recv_timeout);
     log_trace(TAG, "ok");
 
-    log_trace(TAG, "SSL state connect : %d ", tlsDataParams->ssl.state);
     log_trace(TAG, "Performing the SSL/TLS handshake...");
     uint32_t max_timeouts = 3;
     uint32_t num_timeouts = 0;
