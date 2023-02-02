@@ -15,13 +15,22 @@
 
 #define TAG "network_mbedtls_wrapper"
 
-// v5.0 TODO
-// This needs to be a "properly seeded, cryptographically secure RNG"
-static int get_random(void* p_rng, unsigned char* buf, size_t len) {
+static int random_number_generator(void* p_rng, unsigned char* buf, size_t len) {
     (void)p_rng;
-    while (len-- && (buf != NULL)) {
-        *buf++ = (uint8_t)(rand() & 0xFF);
+
+    assert(buf != NULL);
+
+    uint8_t *buf_bytes = (uint8_t *)buf;
+    size_t length = len;
+
+    while (length > 0) {
+        int word = rand();
+        size_t to_copy = (size_t)MIN(sizeof(word), length);
+        memcpy(buf_bytes, &word, to_copy);
+        buf_bytes += to_copy;
+        length -= to_copy;
     }
+
     return 0;
 }
 
@@ -218,7 +227,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
         ret = mbedtls_pk_parse_keyfile(&(tlsDataParams->pkey),
                                        pNetwork->tlsConnectParams.pDevicePrivateKeyLocation,
                                        "",
-                                       get_random,
+                                       random_number_generator,
                                        NULL);
     } else {
         log_trace(TAG, "Loading embedded client private key...");
@@ -227,7 +236,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
                                    strlen(pNetwork->tlsConnectParams.pDevicePrivateKeyLocation)+1,
                                    (const unsigned char *)"",
                                    0,
-                                   get_random,
+                                   random_number_generator,
                                    NULL);
     }
     if(ret != 0) {
