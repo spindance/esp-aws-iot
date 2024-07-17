@@ -30,6 +30,7 @@ set(COMPONENT_REQUIRES
     "esp_timer"
     "mbedtls"
     "pal"
+    "vfs"
 )
 
 register_component()
