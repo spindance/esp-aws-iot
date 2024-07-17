@@ -2,6 +2,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <pal_random.h>
+
 #include "network_mbedtls_wrapper.h"
 #include "mbedtls/esp_debug.h"
 
@@ -211,13 +213,18 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
         ESP_LOGD(TAG, "Loading client private key from file...");
         ret = mbedtls_pk_parse_keyfile(&(tlsDataParams->pkey),
                                        pNetwork->tlsConnectParams.pDevicePrivateKeyLocation,
-                                       "");
+                                       "",
+                                       &pal_random_get_random,
+                                       NULL);
     } else {
         ESP_LOGD(TAG, "Loading embedded client private key...");
         ret = mbedtls_pk_parse_key(&(tlsDataParams->pkey),
                                    (const unsigned char *)pNetwork->tlsConnectParams.pDevicePrivateKeyLocation,
                                    strlen(pNetwork->tlsConnectParams.pDevicePrivateKeyLocation)+1,
-                                   (const unsigned char *)"", 0);
+                                   (const unsigned char *)"",
+                                   0,
+                                   &pal_random_get_random,
+                                   NULL););
     }
     if(ret != 0) {
         ESP_LOGE(TAG, "failed!  mbedtls_pk_parse_key returned -0x%x while parsing private key", -ret);
