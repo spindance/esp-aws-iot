@@ -27,6 +27,7 @@ set(COMPONENT_SRCS
 )
 
 set(COMPONENT_REQUIRES
+    "esp_timer"
     "mbedtls"
 )
 
