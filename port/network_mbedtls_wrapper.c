@@ -390,7 +390,7 @@ int32_t Mbedtls_Send( NetworkContext_t * pNetwork,
     }
 
     if (bytesSent < bytesToSend) {
-        ESP_LOGW(TAG, "Partial write, attempted %lu, actual %ld", bytesToSend, bytesSent);
+        ESP_LOGW(TAG, "Partial write, attempted %u, actual %ld", bytesToSend, bytesSent);
     }
     return bytesSent;
 }
@@ -412,7 +412,7 @@ int32_t Mbedtls_Recv( NetworkContext_t * pNetwork,
         // but timed out without reading anything.
         return 0;
     } else {
-        ESP_LOGE(TAG, "ssl read failed, ret = %d", ret);
+        ESP_LOGE(TAG, "ssl read failed, ret = %ld", ret);
         return -MBEDTLS_SSL_READ_ERROR;
     }
 }
