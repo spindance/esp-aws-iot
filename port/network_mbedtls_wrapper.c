@@ -224,7 +224,7 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
                                    (const unsigned char *)"",
                                    0,
                                    &pal_random_get_random,
-                                   NULL););
+                                   NULL);
     }
     if(ret != 0) {
         ESP_LOGE(TAG, "failed!  mbedtls_pk_parse_key returned -0x%x while parsing private key", -ret);
@@ -310,12 +310,10 @@ MbedtlsStatus_t Mbedtls_Connect( NetworkContext_t * pNetwork, TLSConnectParams* 
         _tls_destroy(pNetwork);
         return MBEDTLS_SSL_CONNECTION_ERROR;
     }
-    ESP_LOGD(TAG, "SSL state connect : %d ", tlsDataParams->ssl.state);
     mbedtls_ssl_set_bio(&(tlsDataParams->ssl), &(tlsDataParams->server_fd), mbedtls_net_send, NULL,
                         mbedtls_net_recv_timeout);
     ESP_LOGD(TAG, "ok");
 
-    ESP_LOGD(TAG, "SSL state connect : %d ", tlsDataParams->ssl.state);
     ESP_LOGD(TAG, "Performing the SSL/TLS handshake...");
     uint32_t max_timeouts = 3;
     uint32_t num_timeouts = 0;
@@ -387,12 +385,12 @@ int32_t Mbedtls_Send( NetworkContext_t * pNetwork,
 
     bytesSent = mbedtls_ssl_write(&(tlsDataParams->ssl), pBuffer, bytesToSend);
     if (bytesSent < 0) {
-        ESP_LOGE(TAG, "Failed to write, ret = -0x%0X", bytesSent);
+        ESP_LOGE(TAG, "Failed to write, ret = -0x%0lX", bytesSent);
         return -MBEDTLS_SSL_WRITE_ERROR;
     }
 
     if (bytesSent < bytesToSend) {
-        ESP_LOGW(TAG, "Partial write, attempted %u, actual %u", bytesToSend, bytesSent);
+        ESP_LOGW(TAG, "Partial write, attempted %lu, actual %ld", bytesToSend, bytesSent);
     }
     return bytesSent;
 }
